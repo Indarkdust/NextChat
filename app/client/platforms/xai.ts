@@ -143,8 +143,8 @@ export class XAIApi implements LLMApi {
       const resJson = await res.json();
       console.log("[Vision Model] Raw response:", resJson);
       
-      // 提取视觉模型的描述
-      const description = this.extractMessage(resJson);
+      // 直接获取内容，grok-2-vision没有reasoning_content
+      const description = resJson.choices?.at(0)?.message?.content || "";
       
       if (!description || description.trim() === "") {
         console.error("[Vision Model] Empty description returned");
@@ -156,7 +156,7 @@ export class XAIApi implements LLMApi {
       return description;
     } catch (e) {
       console.error("[Vision Model] Failed to process image with vision model", e);
-      // 返回一个更详细、更友好的错误描述，而不是简单的"无法处理图像"
+      // 返回一个更详细、更友好的错误描述
       return "图像处理过程中遇到了问题。这可能是因为图像格式不受支持、图像过大或网络连接问题。我将尝试回答您的问题，但无法分析图像内容。";
     }
   }
