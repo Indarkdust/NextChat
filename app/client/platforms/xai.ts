@@ -78,6 +78,7 @@ export class XAIApi implements LLMApi {
 
     const modelName = modelConfig.model;
     const shouldExcludePenalties = shouldExcludePresenceFrequencyPenalty(modelName);
+    const isGrokModel = modelName.includes("grok-3-mini");
 
     // 创建基础请求负载
     const basePayload: any = {
@@ -92,6 +93,11 @@ export class XAIApi implements LLMApi {
     if (!shouldExcludePenalties) {
       basePayload.presence_penalty = modelConfig.presence_penalty;
       basePayload.frequency_penalty = modelConfig.frequency_penalty;
+    }
+
+    // 为grok模型添加reasoning_effort参数
+    if (isGrokModel) {
+      basePayload.reasoning_effort = "high";
     }
 
     // 将请求负载类型转换为 RequestPayload
@@ -139,6 +145,7 @@ export class XAIApi implements LLMApi {
               delta: {
                 content: string;
                 tool_calls: ChatMessageTool[];
+                reasoning_content?: string;  // 添加对reasoning_content的支持
               };
             }>;
             const tool_calls = choices[0]?.delta?.tool_calls;
@@ -160,7 +167,20 @@ export class XAIApi implements LLMApi {
                 runTools[index]["function"]["arguments"] += args;
               }
             }
-            return choices[0]?.delta?.content;
+
+            // 处理reasoning_content，支持显示思考过程
+            const reasoning = choices[0]?.delta?.reasoning_content;
+            const content = choices[0]?.delta?.content;
+
+            // 如果存在reasoning_content，则显示为思考过程
+            if (reasoning && reasoning.length > 0) {
+              return {
+                isThinking: true,
+                content: reasoning,
+              };
+            }
+            
+            return content;
           },
           // processToolMessage, include tool_calls message and tool call results
           (
@@ -192,6 +212,7 @@ export class XAIApi implements LLMApi {
       options.onError?.(e as Error);
     }
   }
+
   async usage() {
     return {
       used: 0,
