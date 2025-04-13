@@ -156,8 +156,8 @@ export class XAIApi implements LLMApi {
       return description;
     } catch (e) {
       console.error("[Vision Model] Failed to process image with vision model", e);
-      // 返回一个默认描述，而不是抛出异常，这样即使图像处理失败，至少用户问题本身还能发送给模型
-      return "无法处理图像。";
+      // 返回一个更详细、更友好的错误描述，而不是简单的"无法处理图像"
+      return "图像处理过程中遇到了问题。这可能是因为图像格式不受支持、图像过大或网络连接问题。我将尝试回答您的问题，但无法分析图像内容。";
     }
   }
 
@@ -254,7 +254,9 @@ export class XAIApi implements LLMApi {
     }
 
     const shouldExcludePenalties = shouldExcludePresenceFrequencyPenalty(modelName);
-    const isGrokModel = modelName.includes("grok-3");  // 修正检测grok-3模型的逻辑
+    
+    // 按照最新信息，只有grok-3-mini模型支持并需要reasoning_effort参数
+    const supportsReasoningEffort = modelName.includes("grok-3-mini");
 
     // 创建基础请求负载
     const basePayload: any = {
@@ -271,8 +273,8 @@ export class XAIApi implements LLMApi {
       basePayload.frequency_penalty = modelConfig.frequency_penalty;
     }
 
-    // 为grok模型添加reasoning_effort参数
-    if (isGrokModel) {
+    // 只为grok-3-mini模型添加该参数
+    if (supportsReasoningEffort) {
       basePayload.reasoning_effort = "high";
     }
 
