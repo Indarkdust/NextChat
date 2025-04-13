@@ -76,14 +76,19 @@ export class XAIApi implements LLMApi {
       },
     };
 
+    const modelName = modelConfig.model.toLowerCase();
+    const isSpecialModel = modelName.includes("grok") || modelName.startsWith("gemini");
+
+    // 创建请求负载，始终包含必要的参数以满足TypeScript类型要求
+    // 对于特殊模型，将不支持的参数设置为undefined以便在JSON化时被省略
     const requestPayload: RequestPayload = {
       messages,
       stream: options.config.stream,
       model: modelConfig.model,
       temperature: modelConfig.temperature,
-      presence_penalty: modelConfig.presence_penalty,
-      frequency_penalty: modelConfig.frequency_penalty,
       top_p: modelConfig.top_p,
+      presence_penalty: isSpecialModel ? undefined : modelConfig.presence_penalty,
+      frequency_penalty: isSpecialModel ? undefined : modelConfig.frequency_penalty,
     };
 
     console.log("[Request] xai payload: ", requestPayload);
