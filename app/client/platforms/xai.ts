@@ -21,6 +21,7 @@ import { getTimeoutMSByModel, shouldExcludePresenceFrequencyPenalty, getMessageT
 import { preProcessImageContent } from "@/app/utils/chat";
 import { RequestPayload } from "./openai";
 import { fetch } from "@/app/utils/stream";
+import Locale from "@/app/locales";
 
 export class XAIApi implements LLMApi {
   private disableListModels = true;
@@ -52,12 +53,17 @@ export class XAIApi implements LLMApi {
     return [baseUrl, path].join("/");
   }
 
-  extractMessage(res: any) {
+  extractMessage(res: any, options?: { skipReasoning?: boolean }) {
     // 检查是否存在reasoning_content
     const reasoningContent = res.choices?.at(0)?.message?.reasoning_content;
     const content = res.choices?.at(0)?.message?.content ?? "";
     
-    // 如果存在reasoning_content，添加到返回内容中
+    // 如果设置了skipReasoning，或者是在生成摘要时，就不包含reasoning_content
+    if (options?.skipReasoning || false) {
+      return content;
+    }
+    
+    // 正常对话时包含reasoning_content
     if (reasoningContent) {
       return `> ${reasoningContent}\n\n${content}`;
     }
@@ -74,23 +80,49 @@ export class XAIApi implements LLMApi {
     messages: ChatOptions["messages"],
     visionModel: string = "grok-2-vision-latest"
   ): Promise<string> {
-    // 创建一个简单的消息数组，只包含图像和简单的提示文本
-    const imageMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
-    
-    // 构建请求负载
-    const requestPayload = {
-      messages: imageMessages,
-      model: visionModel,
-      stream: false,
-      temperature: 0.01, // 较低的温度以获取更确定的描述
-    };
-
-    console.log("[Request] Vision model payload: ", requestPayload);
-
     try {
+      console.log("[Vision Model] Processing image with vision model:", visionModel);
+      
+      // 创建更明确的提示，告诉视觉模型提供详细描述
+      let userMessage = messages[messages.length - 1];
+      let userPrompt = "";
+
+      if (typeof userMessage.content === "string") {
+        userPrompt = userMessage.content;
+      } else {
+        // 从复合消息中提取文本部分
+        const textParts = userMessage.content
+          .filter(item => item.type === "text")
+          .map(item => item.text);
+        userPrompt = textParts.join("\n");
+      }
+      
+      // 构建一个更明确的提示，告诉视觉模型我们需要什么
+      const enhancedMessages = [...messages.slice(0, -1)];
+      
+      // 替换最后一条消息以提供更好的指导
+      enhancedMessages.push({
+        role: userMessage.role,
+        content: [
+          {
+            type: "text",
+            text: `请仔细描述这张图像，提供详细的内容描述，包括图像中的主要物体、场景、文字、颜色和布局等。${userPrompt ? "\n\n用户问题：" + userPrompt : ""}`
+          },
+          ...(typeof userMessage.content === "string" ? [] : 
+              userMessage.content.filter(item => item.type === "image_url"))
+        ]
+      });
+      
+      // 构建请求负载
+      const requestPayload = {
+        messages: enhancedMessages,
+        model: visionModel,
+        stream: false,
+        temperature: 0.01, // 较低的温度以获取更确定的描述
+      };
+
+      console.log("[Vision Model] Sending request to vision model");
+
       // 发送请求到视觉模型
       const chatPath = this.path(XAI.ChatPath);
       const chatPayload = {
@@ -100,21 +132,32 @@ export class XAIApi implements LLMApi {
       };
 
       const res = await fetch(chatPath, chatPayload);
-      const resJson = await res.json();
       
       if (!res.ok) {
-        console.error("[Vision Model] request failed", resJson);
-        throw new Error(`Vision model request failed: ${resJson.error?.message || "Unknown error"}`);
+        console.error("[Vision Model] Request failed with status:", res.status);
+        const errorText = await res.text();
+        console.error("[Vision Model] Error response:", errorText);
+        throw new Error(`Vision model request failed: ${res.status} ${errorText}`);
       }
 
+      const resJson = await res.json();
+      console.log("[Vision Model] Raw response:", resJson);
+      
       // 提取视觉模型的描述
       const description = this.extractMessage(resJson);
+      
+      if (!description || description.trim() === "") {
+        console.error("[Vision Model] Empty description returned");
+        throw new Error("Vision model returned empty description");
+      }
+      
       console.log("[Vision Model] Generated description:", description);
       
       return description;
     } catch (e) {
-      console.error("[Vision Model] failed to process image", e);
-      throw e;
+      console.error("[Vision Model] Failed to process image with vision model", e);
+      // 返回一个默认描述，而不是抛出异常，这样即使图像处理失败，至少用户问题本身还能发送给模型
+      return "无法处理图像。";
     }
   }
 
@@ -148,13 +191,13 @@ export class XAIApi implements LLMApi {
         // 获取最后一条消息（通常是用户的提问）
         const lastMessage = options.messages[options.messages.length - 1];
         
-        // 从用户选择的视觉模型获取图像描述
+        // 从视觉模型获取图像描述
         const imageDescription = await this.processImageWithVisionModel(
           options.messages,
-          "grok-2-vision-latest" // 可以从配置或其他地方获取
+          "grok-2-vision-latest" // 使用grok-2-vision处理图像
         );
         
-        // 创建新的消息数组，将图像描述添加为文本
+        // 创建新的消息数组，保留之前的消息
         processedMessages = options.messages.slice(0, -1).map(msg => ({
           role: msg.role,
           content: typeof msg.content === "string" ? msg.content : getMessageTextContent(msg)
@@ -173,14 +216,26 @@ export class XAIApi implements LLMApi {
         }
         
         // 构建新的用户消息，包含图像描述和原始问题
+        // 使用更清晰的格式，明确区分图像描述和用户问题
+        let finalContent = "";
+        if (imageDescription && imageDescription.trim() !== "") {
+          finalContent += `[图像内容]:\n${imageDescription}\n\n`;
+        }
+        
+        if (userPrompt && userPrompt.trim() !== "") {
+          finalContent += `[用户问题]:\n${userPrompt}`;
+        } else {
+          finalContent += "请描述这个图像。";
+        }
+        
         const newUserMessage = {
           role: lastMessage.role,
-          content: `[图像描述]: ${imageDescription}\n\n${userPrompt}`
+          content: finalContent
         };
         
         processedMessages.push(newUserMessage);
         
-        console.log("[Image Processing] Created new messages with image description");
+        console.log("[Image Processing] Created new messages with image description:", finalContent);
       } catch (e) {
         console.error("[Image Processing] Failed to process image with vision model", e);
         // 出错时回退到原始消息，但移除图像内容
@@ -199,7 +254,7 @@ export class XAIApi implements LLMApi {
     }
 
     const shouldExcludePenalties = shouldExcludePresenceFrequencyPenalty(modelName);
-    const isGrokModel = modelName.includes("grok-3-mini");
+    const isGrokModel = modelName.includes("grok-3");  // 修正检测grok-3模型的逻辑
 
     // 创建基础请求负载
     const basePayload: any = {
@@ -224,7 +279,7 @@ export class XAIApi implements LLMApi {
     // 将请求负载类型转换为 RequestPayload
     const requestPayload = basePayload as RequestPayload;
 
-    console.log("[Request] xai payload: ", requestPayload);
+    console.log("[Request] xai payload:", requestPayload);
 
     const shouldStream = !!options.config.stream;
     const controller = new AbortController();
@@ -332,7 +387,16 @@ export class XAIApi implements LLMApi {
         clearTimeout(requestTimeoutId);
 
         const resJson = await res.json();
-        const message = this.extractMessage(resJson);
+        
+        // 检查是否是摘要请求 (当用户要求生成主题或摘要时的特殊标记)
+        const isSummaryRequest = options.messages.some(m => 
+          typeof m.content === "string" && 
+          (m.content.includes(Locale.Store.Prompt.Topic) || 
+           m.content.includes(Locale.Store.Prompt.Summarize))
+        );
+        
+        // 为摘要请求跳过reasoning_content
+        const message = this.extractMessage(resJson, { skipReasoning: isSummaryRequest });
         options.onFinish(message, res);
       }
     } catch (e) {
