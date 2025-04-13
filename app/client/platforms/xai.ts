@@ -53,7 +53,16 @@ export class XAIApi implements LLMApi {
   }
 
   extractMessage(res: any) {
-    return res.choices?.at(0)?.message?.content ?? "";
+    // 检查是否存在reasoning_content
+    const reasoningContent = res.choices?.at(0)?.message?.reasoning_content;
+    const content = res.choices?.at(0)?.message?.content ?? "";
+    
+    // 如果存在reasoning_content，添加到返回内容中
+    if (reasoningContent) {
+      return `> ${reasoningContent}\n\n${content}`;
+    }
+    
+    return content;
   }
 
   speech(options: SpeechOptions): Promise<ArrayBuffer> {
@@ -139,8 +148,9 @@ export class XAIApi implements LLMApi {
           controller,
           // parseSSE
           (text: string, runTools: ChatMessageTool[]) => {
-            // console.log("parseSSE", text, runTools);
+            console.log("[X.AI Debug] Raw SSE Text:", text);
             const json = JSON.parse(text);
+            console.log("[X.AI Debug] Parsed JSON:", json);
             const choices = json.choices as Array<{
               delta: {
                 content: string;
@@ -148,6 +158,9 @@ export class XAIApi implements LLMApi {
                 reasoning_content?: string;  // 添加对reasoning_content的支持
               };
             }>;
+            console.log("[X.AI Debug] Delta content:", choices[0]?.delta?.content);
+            console.log("[X.AI Debug] Reasoning content:", choices[0]?.delta?.reasoning_content);
+            
             const tool_calls = choices[0]?.delta?.tool_calls;
             if (tool_calls?.length > 0) {
               const index = tool_calls[0]?.index;
