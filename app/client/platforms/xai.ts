@@ -183,8 +183,14 @@ export class XAIApi implements LLMApi {
 
     let processedMessages = [];
     
-    // 如果包含图像且当前模型不是视觉模型，则使用视觉模型处理
-    if (hasImageContent && !isVisionModel) {
+    // 如果当前模型已经是视觉模型，直接传递消息，不做额外处理
+    if (isVisionModel) {
+      console.log("[Image Processing] Using vision model directly:", modelName);
+      // 直接使用原始消息，保持图像URL格式
+      processedMessages = [...options.messages];
+    }
+    // 如果有图像但当前模型不是视觉模型，使用视觉模型处理
+    else if (hasImageContent && !isVisionModel) {
       try {
         console.log("[Image Processing] Detected image content with non-vision model, using vision model pipeline");
         
@@ -280,7 +286,7 @@ export class XAIApi implements LLMApi {
         console.log("[Image Processing] Created new messages with error description:", finalContent);
       }
     } else {
-      // 如果不需要处理图像，或者当前模型已经支持视觉，则正常处理
+      // 如果没有图像内容，正常处理
       processedMessages = [];
       for (const v of options.messages) {
         const content = await preProcessImageContent(v.content);
