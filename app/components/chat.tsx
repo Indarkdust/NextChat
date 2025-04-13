@@ -1514,7 +1514,9 @@ function _Chat() {
   const handlePaste = useCallback(
     async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const currentModel = chatStore.currentSession().mask.modelConfig.model;
-      if (!isVisionModel(currentModel)) {
+      const currentProviderName = chatStore.currentSession().mask.modelConfig?.providerName;
+      // 修改条件判断，添加对XAI提供商的支持
+      if (!isVisionModel(currentModel) && currentProviderName !== ServiceProvider.XAI) {
         return;
       }
       const items = (event.clipboardData || window.clipboardData).items;
