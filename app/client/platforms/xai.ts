@@ -253,17 +253,65 @@ export class XAIApi implements LLMApi {
         processedMessages.push({ role: msg.role, content });
       }
     } else if (hasImageContent) {
-      // 如果不是视觉模型但包含图像，需要从消息中提取纯文本
-      console.log("[Image Processing] Non-vision model with images, extracting text only");
-      processedMessages = options.messages.map(msg => ({
-        role: msg.role,
-        content: typeof msg.content === "string" ? msg.content : getMessageTextContent(msg)
-      }));
+      // 非视觉模型但含有图像：使用grok-2-vision先处理图像，再传给目标模型
+      console.log("[Image Processing] Processing images with vision model for non-vision model");
+      
+      // 步骤1: 创建基础消息数组（保留所有不含图像的消息）
+      processedMessages = [];
+      for (let i = 0; i < options.messages.length; i++) {
+        const msg = options.messages[i];
+        
+        if (typeof msg.content === "string" || !msg.content.some(item => item.type === "image_url")) {
+          // 不包含图像的消息直接添加
+          processedMessages.push({ role: msg.role, content: msg.content });
+        } else {
+          // 包含图像的消息需要处理
+          try {
+            // 使用grok-2-vision获取图像描述
+            const imageMessages = [msg];
+            const imageDescription = await this.processImageWithVisionModel(imageMessages, "grok-2-vision-latest");
+            
+            // 提取消息中的文本部分
+            let textContent = "";
+            if (typeof msg.content !== "string") {
+              const textParts = msg.content
+                .filter(item => item.type === "text")
+                .map(item => item.text);
+              textContent = textParts.join("\n").trim();
+            }
+            
+            // 创建新消息，包含图像描述和原文本
+            let newContent = "";
+            
+            if (imageDescription && imageDescription.trim() !== "") {
+              newContent += `[图像内容]: ${imageDescription}\n\n`;
+            } else {
+              newContent += "[图像内容]: 无法获取图像描述。\n\n";
+            }
+            
+            if (textContent) {
+              newContent += `[用户问题]: ${textContent}`;
+            } else {
+              newContent += "请描述这个图像。";
+            }
+            
+            processedMessages.push({ role: msg.role, content: newContent });
+            console.log("[Image Processing] Processed image with vision model:", newContent.substring(0, 100) + "...");
+          } catch (e) {
+            console.error("[Image Processing] Error processing image:", e);
+            // 错误处理：如果图像处理失败，使用默认文本
+            const textContent = typeof msg.content === "string" ? msg.content : getMessageTextContent(msg);
+            const errorContent = `[图像处理错误]: 处理图像时出现问题，无法获取图像描述。\n\n[用户问题]: ${textContent || "请描述这个图像。"}`;
+            processedMessages.push({ role: msg.role, content: errorContent });
+          }
+        }
+      }
     } else {
       // 不含图像的普通消息处理
       processedMessages = [...options.messages];
     }
 
+    // 检查是否需要排除某些惩罚参数
     const shouldExcludePenalties = shouldExcludePresenceFrequencyPenalty(modelName);
     
     // 只有grok-3-mini模型支持reasoning_effort参数
