@@ -570,7 +570,9 @@ export function ChatActions(props: {
   const isMobileScreen = useMobileScreen();
 
   useEffect(() => {
-    const show = isVisionModel(currentModel);
+    // 修改判断条件，允许XAI模型（如Grok系列）始终显示上传图片按钮，而不仅限于支持视觉的模型
+    const currentProviderName = session.mask.modelConfig?.providerName;
+    const show = isVisionModel(currentModel) || currentProviderName === ServiceProvider.XAI;
     setShowUploadImage(show);
     if (!show) {
       props.setAttachImages([]);
@@ -1561,7 +1563,7 @@ function _Chat() {
         const fileInput = document.createElement("input");
         fileInput.type = "file";
         fileInput.accept =
-          "image/png, image/jpeg, image/webp, image/heic, image/heif";
+          "image/png, image/jpeg, image/webp, image/heic, image.heif";
         fileInput.multiple = true;
         fileInput.onchange = (event: any) => {
           setUploading(true);
