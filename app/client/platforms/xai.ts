@@ -41,16 +41,33 @@ export class XAIApi implements LLMApi {
       baseUrl = isApp ? XAI_BASE_URL : apiPath;
     }
 
+    // 确保baseUrl格式正确
     if (baseUrl.endsWith("/")) {
       baseUrl = baseUrl.slice(0, baseUrl.length - 1);
     }
-    if (!baseUrl.startsWith("http") && !baseUrl.startsWith(ApiPath.XAI)) {
+    
+    // 修正URL格式以防止Invalid URL错误
+    if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://") && !baseUrl.startsWith(ApiPath.XAI)) {
       baseUrl = "https://" + baseUrl;
     }
+    
+    // 确保path以/开头
+    if (path && !path.startsWith("/")) {
+      path = "/" + path;
+    }
 
-    console.log("[Proxy Endpoint] ", baseUrl, path);
-
-    return [baseUrl, path].join("/");
+    const fullPath = `${baseUrl}${path}`;
+    
+    // 验证URL是否有效以防止Invalid URL错误
+    try {
+      new URL(fullPath);
+      console.log("[Proxy Endpoint] ", fullPath);
+      return fullPath;
+    } catch (e) {
+      console.error("[Proxy Endpoint] Invalid URL:", fullPath, e);
+      // 返回一个安全的URL作为后备
+      return baseUrl.startsWith(ApiPath.XAI) ? baseUrl + path : `https://api.x.ai/v1${path}`;
+    }
   }
 
   extractMessage(res: any, options?: { skipReasoning?: boolean }) {
