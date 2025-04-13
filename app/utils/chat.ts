@@ -112,23 +112,74 @@ export async function preProcessImageContentForAlibabaDashScope(
 
 const imageCaches: Record<string, string> = {};
 export function cacheImageToBase64Image(imageUrl: string) {
+  if (!imageUrl) {
+    console.error("[Image Processing] Invalid image URL: empty");
+    return Promise.resolve(""); // 返回空字符串而不是抛出错误
+  }
+  
+  // 验证URL格式
+  try {
+    // 对于data:开头的base64图片，不需要验证URL格式
+    if (!imageUrl.startsWith("data:")) {
+      // 检查URL是否有效
+      new URL(imageUrl);
+    }
+  } catch (error) {
+    console.error("[Image Processing] Invalid image URL format:", error);
+    return Promise.resolve(""); // 返回空字符串而不是抛出错误
+  }
+
   if (imageUrl.includes(CACHE_URL_PREFIX)) {
     if (!imageCaches[imageUrl]) {
-      const reader = new FileReader();
-      return fetch(imageUrl, {
-        method: "GET",
-        mode: "cors",
-        credentials: "include",
-      })
-        .then((res) => res.blob())
-        .then(
-          async (blob) =>
-            (imageCaches[imageUrl] = await compressImage(blob, 256 * 1024)),
-        ); // compressImage
+      try {
+        const reader = new FileReader();
+        return fetch(imageUrl, {
+          method: "GET",
+          mode: "cors",
+          credentials: "include",
+        })
+          .then((res) => {
+            if (!res.ok) {
+              throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
+            }
+            return res.blob();
+          })
+          .then(
+            async (blob) => {
+              try {
+                imageCaches[imageUrl] = await compressImage(blob, 256 * 1024);
+                return imageCaches[imageUrl];
+              } catch (error) {
+                console.error("[Image Processing] Failed to compress image:", error);
+                throw error;
+              }
+            }
+          )
+          .catch((error) => {
+            console.error("[Image Processing] Error fetching/processing image:", error);
+            return ""; // 出错时返回空字符串
+          });
+      } catch (error) {
+        console.error("[Image Processing] Critical error in image caching:", error);
+        return Promise.resolve(""); // 出错时返回空字符串
+      }
     }
     return Promise.resolve(imageCaches[imageUrl]);
   }
-  return Promise.resolve(imageUrl);
+  
+  // 确保返回的是有效的URL或base64数据
+  if (imageUrl.startsWith("data:") || imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    return Promise.resolve(imageUrl);
+  } else {
+    // 尝试修复URL
+    try {
+      const fixedUrl = new URL(imageUrl).href;
+      return Promise.resolve(fixedUrl);
+    } catch {
+      // 如果无法修复，添加https://前缀
+      return Promise.resolve(`https://${imageUrl}`);
+    }
+  }
 }
 
 export function base64Image2Blob(base64Data: string, contentType: string) {
