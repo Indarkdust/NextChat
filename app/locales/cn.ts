@@ -307,6 +307,13 @@ const cn = {
     },
 
     Access: {
+      SaasStart: {
+         Title: "",
+         Label: "",
+         SubTitle:
+           "",
+         ChatNow: "别按我",
+       },
       AccessCode: {
         Title: "访问密码",
         SubTitle: "管理员已开启加密访问",
