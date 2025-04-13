@@ -118,6 +118,23 @@ export function isIOS() {
   return /iphone|ipad|ipod/.test(userAgent);
 }
 
+export function shouldExcludePresenceFrequencyPenalty(modelName: string): boolean {
+  const normalizedModelName = modelName.toLowerCase();
+  
+  // 检查是否是特定的模型名称
+  if (normalizedModelName.includes("grok-") || 
+      normalizedModelName.startsWith("gemini") ||
+      normalizedModelName.includes("mixtral") ||
+      normalizedModelName.includes("llama") ||
+      normalizedModelName.includes("claude")) {
+    return true;
+  }
+  
+  // 可以根据需要添加更多规则
+  
+  return false;
+}
+
 export function useWindowSize() {
   const [size, setSize] = useState({
     width: window.innerWidth,
