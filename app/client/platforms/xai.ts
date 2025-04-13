@@ -8,7 +8,7 @@ import {
   ChatMessageTool,
   usePluginStore,
 } from "@/app/store";
-import { stream } from "@/app/utils/chat";
+import { streamWithThink } from "@/app/utils/chat";
 import {
   ChatOptions,
   getHeaders,
@@ -130,7 +130,7 @@ export class XAIApi implements LLMApi {
           .getAsTools(
             useChatStore.getState().currentSession().mask?.plugin || [],
           );
-        return stream(
+        return streamWithThink(
           chatPath,
           requestPayload,
           getHeaders(),
@@ -180,7 +180,10 @@ export class XAIApi implements LLMApi {
               };
             }
             
-            return content;
+            return {
+              isThinking: false,
+              content: content || "",
+            };
           },
           // processToolMessage, include tool_calls message and tool call results
           (
