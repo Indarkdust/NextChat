@@ -238,11 +238,46 @@ export class XAIApi implements LLMApi {
         console.log("[Image Processing] Created new messages with image description:", finalContent);
       } catch (e) {
         console.error("[Image Processing] Failed to process image with vision model", e);
-        // 出错时回退到原始消息，但移除图像内容
-        processedMessages = options.messages.map(msg => ({
+        
+        // 获取最后一条消息（通常是用户的提问）
+        const lastMessage = options.messages[options.messages.length - 1];
+        
+        // 创建新的消息数组，保留之前的消息
+        processedMessages = options.messages.slice(0, -1).map(msg => ({
           role: msg.role,
           content: typeof msg.content === "string" ? msg.content : getMessageTextContent(msg)
         }));
+        
+        // 提取最后一条消息的文本部分
+        let userPrompt = "";
+        if (typeof lastMessage.content === "string") {
+          userPrompt = lastMessage.content;
+        } else {
+          // 从复合消息中提取文本部分
+          const textParts = lastMessage.content
+            .filter(item => item.type === "text")
+            .map(item => item.text);
+          userPrompt = textParts.join("\n");
+        }
+        
+        // 构建新的用户消息，包含错误提示和原始问题
+        let finalContent = "";
+        finalContent += "[图像处理错误]:\n图像处理过程中遇到了问题。这可能是因为图像格式不受支持、图像过大或网络连接问题。\n\n";
+        
+        if (userPrompt && userPrompt.trim() !== "") {
+          finalContent += `[用户问题]:\n${userPrompt}`;
+        } else {
+          finalContent += "请帮我回答问题。";
+        }
+        
+        const newUserMessage = {
+          role: lastMessage.role,
+          content: finalContent
+        };
+        
+        processedMessages.push(newUserMessage);
+        
+        console.log("[Image Processing] Created new messages with error description:", finalContent);
       }
     } else {
       // 如果不需要处理图像，或者当前模型已经支持视觉，则正常处理
