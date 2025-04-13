@@ -17,7 +17,7 @@ import {
   SpeechOptions,
 } from "../api";
 import { getClientConfig } from "@/app/config/client";
-import { getTimeoutMSByModel } from "@/app/utils";
+import { getTimeoutMSByModel, shouldExcludePresenceFrequencyPenalty } from "@/app/utils";
 import { preProcessImageContent } from "@/app/utils/chat";
 import { RequestPayload } from "./openai";
 import { fetch } from "@/app/utils/stream";
@@ -76,20 +76,26 @@ export class XAIApi implements LLMApi {
       },
     };
 
-    const modelName = modelConfig.model.toLowerCase();
-    const isSpecialModel = modelName.includes("grok") || modelName.startsWith("gemini");
+    const modelName = modelConfig.model;
+    const shouldExcludePenalties = shouldExcludePresenceFrequencyPenalty(modelName);
 
-    // 创建请求负载，始终包含必要的参数以满足TypeScript类型要求
-    // 对于特殊模型，将不支持的参数设置为undefined以便在JSON化时被省略
-    const requestPayload: RequestPayload = {
+    // 创建基础请求负载
+    const basePayload: any = {
       messages,
       stream: options.config.stream,
       model: modelConfig.model,
       temperature: modelConfig.temperature,
       top_p: modelConfig.top_p,
-      presence_penalty: isSpecialModel ? undefined : modelConfig.presence_penalty,
-      frequency_penalty: isSpecialModel ? undefined : modelConfig.frequency_penalty,
     };
+
+    // 只有当模型支持这些参数时才添加它们
+    if (!shouldExcludePenalties) {
+      basePayload.presence_penalty = modelConfig.presence_penalty;
+      basePayload.frequency_penalty = modelConfig.frequency_penalty;
+    }
+
+    // 将请求负载类型转换为 RequestPayload
+    const requestPayload = basePayload as RequestPayload;
 
     console.log("[Request] xai payload: ", requestPayload);
 
