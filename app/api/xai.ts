@@ -15,14 +15,30 @@ const serverConfig = getServerSideConfig();
 // 添加fetch函数，用于下载并转换为base64
 async function fetchImageAsBase64(url: string): Promise<string> {
   try {
-    console.log(`[XAI Image Proxy] Fetching image from: ${url}`);
-    const response = await fetch(url, {
+    // 检查是否是当前域名的URL
+    const isLocalDomain = url.includes('c.darkdust.xyz') || url.includes('localhost') || url.includes('127.0.0.1');
+    
+    console.log(`[XAI Image Proxy] Fetching image from: ${url} (${isLocalDomain ? 'local domain' : 'external domain'})`);
+    
+    const fetchOptions: RequestInit = {
       headers: {
         // 添加常见浏览器请求头以避免被某些服务器拒绝
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
       }
-    });
+    };
+    
+    // 如果是当前域名，添加更宽松的CORS设置
+    if (isLocalDomain) {
+      fetchOptions.headers = {
+        ...fetchOptions.headers,
+        'Origin': 'https://c.darkdust.xyz',
+        'Referer': 'https://c.darkdust.xyz/'
+      };
+      fetchOptions.credentials = 'include';
+    }
+    
+    const response = await fetch(url, fetchOptions);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
@@ -32,8 +48,9 @@ async function fetchImageAsBase64(url: string): Promise<string> {
     const buffer = await response.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
     return `data:${contentType};base64,${base64}`;
-  } catch (error) {
-    console.error(`[XAI Image Proxy] Error fetching image: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[XAI Image Proxy] Error fetching image: ${errorMessage}`);
     throw error;
   }
 }
@@ -60,12 +77,37 @@ async function processImageUrls(body: any): Promise<any> {
             if (!url.startsWith('data:')) {
               try {
                 console.log(`[XAI Image Proxy] Converting URL to base64: ${url.substring(0, 50)}...`);
+                
+                // 处理 c.darkdust.xyz 上的缓存图片
+                if (url.includes('c.darkdust.xyz/api/cache')) {
+                  console.log('[XAI Image Proxy] Detected c.darkdust.xyz cache API URL');
+                  // 这里首先尝试直接获取图像，如果失败，可以考虑通过其他方式处理
+                  try {
+                    // 从URL中提取缓存ID
+                    const cacheId = url.split('/').pop()?.split('.')[0];
+                    if (cacheId) {
+                      console.log(`[XAI Image Proxy] Extracted cache ID: ${cacheId}`);
+                    }
+                  } catch (extractError) {
+                    console.error('[XAI Image Proxy] Failed to extract cache ID:', extractError);
+                  }
+                }
+                
                 const base64Url = await fetchImageAsBase64(url);
                 content.image_url.url = base64Url;
                 console.log('[XAI Image Proxy] Successfully converted image to base64');
-              } catch (error) {
-                console.error(`[XAI Image Proxy] Failed to proxy image: ${error.message}`);
-                // 不抛出错误，让API继续处理，XAI可能会自己处理URL错误
+              } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error(`[XAI Image Proxy] Failed to proxy image: ${errorMessage}`);
+                
+                // 对于 c.darkdust.xyz 域名的错误，提供更详细的错误信息
+                if (url.includes('c.darkdust.xyz')) {
+                  console.error(`[XAI Image Proxy] This appears to be an internal domain image. Check that the cache API is working correctly and the image exists.`);
+                  
+                  // 将内容替换为错误消息，而不是让请求失败
+                  // 注意：这只是一个后备方案，在图像无法获取时仍然允许请求继续
+                  content.image_url.url = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZWVlZSI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmaWxsPSIjODg4ODg4Ij5JbWFnZSBub3QgYXZhaWxhYmxlPC90ZXh0Pjwvc3ZnPg==';
+                }
               }
             }
           }
