@@ -108,8 +108,34 @@ async function request(req: NextRequest) {
       console.error(`[XAI] filter`, e);
     }
   }
+
+  // 打印实际请求详情，便于调试
+  console.log(`[XAI] Request URL: ${fetchUrl}, Method: ${req.method}`);
+
   try {
+    console.log(`[XAI] Making request to: ${fetchUrl}`);
     const res = await fetch(fetchUrl, fetchOptions);
+
+    // 记录响应状态
+    console.log(`[XAI] Response status: ${res.status} ${res.statusText}`);
+
+    // 如果是403错误，尝试提供更详细的错误信息
+    if (res.status === 403) {
+      try {
+        const errorData = await res.clone().json();
+        console.error(`[XAI] 403 Error details:`, errorData);
+        return NextResponse.json(
+          {
+            error: true,
+            message: `X.AI API 拒绝访问: ${JSON.stringify(errorData)}`,
+            details: errorData,
+          },
+          { status: 403 }
+        );
+      } catch (e) {
+        console.error(`[XAI] Failed to parse 403 error response:`, e);
+      }
+    }
 
     // to prevent browser prompt for credentials
     const newHeaders = new Headers(res.headers);
