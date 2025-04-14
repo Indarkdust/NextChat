@@ -104,9 +104,18 @@ async function processImageUrls(body: any): Promise<any> {
                 if (url.includes('c.darkdust.xyz')) {
                   console.error(`[XAI Image Proxy] This appears to be an internal domain image. Check that the cache API is working correctly and the image exists.`);
                   
-                  // 将内容替换为错误消息，而不是让请求失败
-                  // 注意：这只是一个后备方案，在图像无法获取时仍然允许请求继续
-                  content.image_url.url = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZWVlZSI+PC9yZWN0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBhbGlnbm1lbnQtYmFzZWxpbmU9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmaWxsPSIjODg4ODg4Ij5JbWFnZSBub3QgYXZhaWxhYmxlPC90ZXh0Pjwvc3ZnPg==';
+                  // 使用PNG格式的占位图，而不是SVG（因为XAI只支持JPG/PNG）
+                  // 这是一个1x1像素的透明PNG
+                  const fallbackPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAAGQCAYAAACAvzbMAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAABFklEQVR42u3BMQEAAADCoPVP7WsIoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeAOmrQABBJn+pQAAAABJRU5ErkJggg==';
+
+                  // 为了保持请求继续，提供一个简单的透明图片
+                  content.image_url.url = fallbackPng;
+                  
+                  // 在请求负载中添加文本说明，告知图像获取失败
+                  message.content.unshift({
+                    type: "text",
+                    text: "[注意: 图像获取失败。原始图像URL: " + url + ". 错误信息: " + errorMessage + "]"
+                  });
                 }
               }
             }
