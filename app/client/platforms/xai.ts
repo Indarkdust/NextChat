@@ -46,34 +46,33 @@ export class XAIApi implements LLMApi {
       baseUrl = baseUrl.slice(0, baseUrl.length - 1);
     }
 
-    // 修正URL格式以防止Invalid URL错误
-    if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://") && !baseUrl.startsWith(ApiPath.XAI)) {
-      baseUrl = "https://" + baseUrl;
-    }
-
     // 确保path以/开头
     if (path && !path.startsWith("/")) {
       path = "/" + path;
     }
 
-    const fullPath = `${baseUrl}${path}`;
+    // 当使用相对路径时(ApiPath.XAI)，直接返回不需要构建完整URL
+    if (baseUrl === ApiPath.XAI) {
+      return baseUrl + path;
+    }
 
-    // 验证URL是否有效以防止Invalid URL错误
+    // 修正URL格式以防止Invalid URL错误
+    if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+      baseUrl = "https://" + baseUrl;
+    }
+
+    // 尝试构建和验证URL
     try {
-      const validatedUrl = new URL(fullPath);
-      console.log("[Proxy Endpoint] Valid URL:", validatedUrl.href);
-      return validatedUrl.href;
+      const fullPath = `${baseUrl}${path}`;
+      new URL(fullPath); // 验证URL格式但不使用结果
+      return fullPath;
     } catch (e) {
-      console.error("[Proxy Endpoint] Invalid URL:", fullPath, e);
+      console.error("[Proxy Endpoint] Invalid URL construction:", baseUrl + path, e);
 
       // 返回一个安全的URL作为后备
-      if (baseUrl.startsWith(ApiPath.XAI)) {
-        return baseUrl + path;
-      } else {
-        const fallbackUrl = `https://api.x.ai/v1${path}`;
-        console.warn("[Proxy Endpoint] Falling back to:", fallbackUrl);
-        return fallbackUrl;
-      }
+      const fallbackUrl = `https://api.x.ai/v1${path}`;
+      console.warn("[Proxy Endpoint] Falling back to:", fallbackUrl);
+      return fallbackUrl;
     }
   }
 
