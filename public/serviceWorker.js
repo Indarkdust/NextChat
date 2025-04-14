@@ -46,17 +46,43 @@ async function remove(request, url) {
   return jsonify({ code: 0 })
 }
 
+// 从URL中获取缓存键，忽略查询参数
+function getCacheKeyFromUrl(url) {
+  // 创建一个没有查询参数的URL用于缓存匹配
+  // 例如 "/api/cache/abc.png?param=value" 变成 "/api/cache/abc.png"
+  const urlObj = new URL(url);
+  return urlObj.origin + urlObj.pathname;
+}
+
 self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  if (/^\/api\/cache/.test(url.pathname)) {
-    if ('GET' == e.request.method) {
-      e.respondWith(caches.match(e.request))
+  try {
+    const url = new URL(e.request.url);
+    
+    if (/^\/api\/cache/.test(url.pathname)) {
+      if ('GET' == e.request.method) {
+        // 使用不含查询参数的URL作为缓存键
+        e.respondWith(
+          caches.open(CHATGPT_NEXT_WEB_FILE_CACHE).then(cache => {
+            const cacheKey = getCacheKeyFromUrl(e.request.url);
+            // 先尝试用精确URL查找缓存
+            return cache.match(e.request).then(response => {
+              if (response) {
+                return response;
+              }
+              // 如果找不到，尝试使用不带查询参数的路径查找
+              return cache.match(new Request(cacheKey));
+            });
+          })
+        );
+      }
+      if ('POST' == e.request.method) {
+        e.respondWith(upload(e.request, url));
+      }
+      if ('DELETE' == e.request.method) {
+        e.respondWith(remove(e.request, url));
+      }
     }
-    if ('POST' == e.request.method) {
-      e.respondWith(upload(e.request, url))
-    }
-    if ('DELETE' == e.request.method) {
-      e.respondWith(remove(e.request, url))
-    }
+  } catch (error) {
+    console.error("[ServiceWorker] Error handling fetch event:", error);
   }
 });
