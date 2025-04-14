@@ -12,6 +12,71 @@ import { isModelNotavailableInServer } from "@/app/utils/model";
 
 const serverConfig = getServerSideConfig();
 
+// 添加fetch函数，用于下载并转换为base64
+async function fetchImageAsBase64(url: string): Promise<string> {
+  try {
+    console.log(`[XAI Image Proxy] Fetching image from: ${url}`);
+    const response = await fetch(url, {
+      headers: {
+        // 添加常见浏览器请求头以避免被某些服务器拒绝
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const buffer = await response.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString('base64');
+    return `data:${contentType};base64,${base64}`;
+  } catch (error) {
+    console.error(`[XAI Image Proxy] Error fetching image: ${error.message}`);
+    throw error;
+  }
+}
+
+// 处理图像URL，将外部URL代理为base64数据
+async function processImageUrls(body: any): Promise<any> {
+  if (!body || typeof body !== 'object') return body;
+
+  // 处理messages数组
+  if (Array.isArray(body.messages)) {
+    for (let i = 0; i < body.messages.length; i++) {
+      const message = body.messages[i];
+      
+      // 处理多模态内容
+      if (message && Array.isArray(message.content)) {
+        for (let j = 0; j < message.content.length; j++) {
+          const content = message.content[j];
+          
+          // 处理图像URL
+          if (content && content.type === 'image_url' && content.image_url && content.image_url.url) {
+            const url = content.image_url.url;
+            
+            // 如果URL不是data:开头（不是base64），则尝试代理
+            if (!url.startsWith('data:')) {
+              try {
+                console.log(`[XAI Image Proxy] Converting URL to base64: ${url.substring(0, 50)}...`);
+                const base64Url = await fetchImageAsBase64(url);
+                content.image_url.url = base64Url;
+                console.log('[XAI Image Proxy] Successfully converted image to base64');
+              } catch (error) {
+                console.error(`[XAI Image Proxy] Failed to proxy image: ${error.message}`);
+                // 不抛出错误，让API继续处理，XAI可能会自己处理URL错误
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return body;
+}
+
 export async function handle(
   req: NextRequest,
   { params }: { params: { path: string[] } },
@@ -94,6 +159,12 @@ async function request(req: NextRequest) {
         if (!requestBody.model) {
           requestBody.model = "grok-3";
           console.log("[XAI] 未指定模型，使用默认模型: grok-3");
+        }
+
+        // 对于视觉模型请求，处理图片URL
+        if (requestBody.model.includes("vision") || path.includes("/chat/completions")) {
+          console.log("[XAI] 检测到可能的视觉模型请求，处理图片URL");
+          requestBody = await processImageUrls(requestBody);
         }
         
         // 将修改后的请求体重新序列化
