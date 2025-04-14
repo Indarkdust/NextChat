@@ -17,9 +17,33 @@ export async function handle(
   req.nextUrl.searchParams.delete("provider");
 
   const subpath = params.path.join("/");
-  const fetchUrl = `${req.headers.get(
-    "x-base-url",
-  )}/${subpath}?${req.nextUrl.searchParams.toString()}`;
+  
+  // 检查x-base-url是否存在，并确保是有效的URL字符串
+  const baseUrlHeader = req.headers.get("x-base-url");
+  if (!baseUrlHeader) {
+    return NextResponse.json(
+      { error: "Missing x-base-url header" },
+      { status: 400 },
+    );
+  }
+  
+  // 确保baseUrl以http(s)://开头
+  let baseUrl = baseUrlHeader;
+  if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+    baseUrl = `https://${baseUrl}`;
+  }
+  
+  // 移除末尾的斜杠
+  if (baseUrl.endsWith("/")) {
+    baseUrl = baseUrl.slice(0, -1);
+  }
+  
+  const fetchUrl = `${baseUrl}/${subpath}${
+    req.nextUrl.searchParams.toString() ? `?${req.nextUrl.searchParams.toString()}` : ""
+  }`;
+  
+  console.log("[Proxy] fetchUrl:", fetchUrl);
+  
   const skipHeaders = ["connection", "host", "origin", "referer", "cookie"];
   const headers = new Headers(
     Array.from(req.headers.entries()).filter((item) => {
@@ -34,8 +58,7 @@ export async function handle(
     }),
   );
   // if dalle3 use openai api key
-    const baseUrl = req.headers.get("x-base-url");
-    if (baseUrl?.includes("api.openai.com")) {
+    if (baseUrl.includes("api.openai.com")) {
       if (!serverConfig.apiKey) {
         return NextResponse.json(
           { error: "OpenAI API key not configured" },
