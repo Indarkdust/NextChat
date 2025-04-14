@@ -117,22 +117,26 @@ export function cacheImageToBase64Image(imageUrl: string) {
     return Promise.resolve(""); // 返回空字符串而不是抛出错误
   }
   
-  // 验证URL格式
-  try {
-    // 对于data:开头的base64图片，不需要验证URL格式
-    if (!imageUrl.startsWith("data:")) {
+  // 处理相对路径URL（以/开头的路径）
+  if (imageUrl.startsWith("/")) {
+    // 对于相对路径，无需验证URL格式，直接使用
+    console.log("[Image Processing] Processing relative path URL:", imageUrl);
+  } 
+  // 验证完整URL的格式
+  else if (!imageUrl.startsWith("data:")) {
+    try {
       // 检查URL是否有效
       new URL(imageUrl);
+    } catch (error) {
+      console.error("[Image Processing] Invalid URL format, attempting to fix:", imageUrl);
+      // 尝试修复URL但不中断流程
+      // 后续代码会处理这种情况
     }
-  } catch (error) {
-    console.error("[Image Processing] Invalid image URL format:", error);
-    return Promise.resolve(""); // 返回空字符串而不是抛出错误
   }
 
   if (imageUrl.includes(CACHE_URL_PREFIX)) {
     if (!imageCaches[imageUrl]) {
       try {
-        const reader = new FileReader();
         return fetch(imageUrl, {
           method: "GET",
           mode: "cors",
@@ -170,8 +174,11 @@ export function cacheImageToBase64Image(imageUrl: string) {
   // 确保返回的是有效的URL或base64数据
   if (imageUrl.startsWith("data:") || imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
     return Promise.resolve(imageUrl);
+  } else if (imageUrl.startsWith("/")) {
+    // 处理相对路径，保持原样返回
+    return Promise.resolve(imageUrl);
   } else {
-    // 尝试修复URL
+    // 尝试修复其他URL
     try {
       const fixedUrl = new URL(imageUrl).href;
       return Promise.resolve(fixedUrl);
