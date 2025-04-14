@@ -66,11 +66,18 @@ async function processImageUrls(body: any): Promise<any> {
       
       // 处理多模态内容
       if (message && Array.isArray(message.content)) {
+        const textContent: string[] = [];
+        const validImageParts = [];
+        
+        // 首先收集所有文本内容和有效图像内容
         for (let j = 0; j < message.content.length; j++) {
           const content = message.content[j];
           
+          if (content?.type === "text" && content.text) {
+            textContent.push(content.text);
+          }
           // 处理图像URL
-          if (content && content.type === 'image_url' && content.image_url && content.image_url.url) {
+          else if (content?.type === "image_url" && content?.image_url?.url) {
             const url = content.image_url.url;
             
             // 如果URL不是data:开头（不是base64），则尝试代理
@@ -81,9 +88,8 @@ async function processImageUrls(body: any): Promise<any> {
                 // 处理 c.darkdust.xyz 上的缓存图片
                 if (url.includes('c.darkdust.xyz/api/cache')) {
                   console.log('[XAI Image Proxy] Detected c.darkdust.xyz cache API URL');
-                  // 这里首先尝试直接获取图像，如果失败，可以考虑通过其他方式处理
+                  // 从URL中提取缓存ID
                   try {
-                    // 从URL中提取缓存ID
                     const cacheId = url.split('/').pop()?.split('.')[0];
                     if (cacheId) {
                       console.log(`[XAI Image Proxy] Extracted cache ID: ${cacheId}`);
@@ -94,31 +100,96 @@ async function processImageUrls(body: any): Promise<any> {
                 }
                 
                 const base64Url = await fetchImageAsBase64(url);
-                content.image_url.url = base64Url;
-                console.log('[XAI Image Proxy] Successfully converted image to base64');
+                
+                // 验证base64Url是否为有效图像格式
+                if (base64Url && 
+                   (base64Url.startsWith('data:image/jpeg') || 
+                    base64Url.startsWith('data:image/png') || 
+                    base64Url.startsWith('data:image/gif'))) {
+                  
+                  // 保留有效图像
+                  validImageParts.push({
+                    type: "image_url",
+                    image_url: { url: base64Url }
+                  });
+                  console.log('[XAI Image Proxy] Successfully converted image to base64');
+                } else {
+                  console.error('[XAI Image Proxy] Invalid image format:', base64Url.substring(0, 50));
+                  throw new Error('Invalid image format');
+                }
               } catch (error: unknown) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 console.error(`[XAI Image Proxy] Failed to proxy image: ${errorMessage}`);
                 
-                // 对于 c.darkdust.xyz 域名的错误，提供更详细的错误信息
-                if (url.includes('c.darkdust.xyz')) {
-                  console.error(`[XAI Image Proxy] This appears to be an internal domain image. Check that the cache API is working correctly and the image exists.`);
-                  
-                  // 使用PNG格式的占位图，而不是SVG（因为XAI只支持JPG/PNG）
-                  // 这是一个1x1像素的透明PNG
-                  const fallbackPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAAGQCAYAAACAvzbMAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAABFklEQVR42u3BMQEAAADCoPVP7WsIoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeAOmrQABBJn+pQAAAABJRU5ErkJggg==';
-
-                  // 为了保持请求继续，提供一个简单的透明图片
-                  content.image_url.url = fallbackPng;
-                  
-                  // 在请求负载中添加文本说明，告知图像获取失败
-                  message.content.unshift({
-                    type: "text",
-                    text: "[注意: 图像获取失败。原始图像URL: " + url + ". 错误信息: " + errorMessage + "]"
-                  });
-                }
+                // 记录错误但不添加无效图像到有效列表中
+                textContent.push(`[图像无法加载] 原始URL: ${url}. 错误: ${errorMessage}`);
               }
+            } else {
+              // 已经是base64格式，直接添加到有效图像列表
+              validImageParts.push(content);
             }
+          } else {
+            // 其他类型的内容，直接保留
+            validImageParts.push(content);
+          }
+        }
+        
+        // 根据模型是否为grok-2-vision-latest处理
+        if (body.model === 'grok-2-vision-latest' || body.model === 'grok-2-vision') {
+          if (validImageParts.length > 0) {
+            // 只保留有效的图像和文本组合
+            message.content = [
+              {
+                type: "text",
+                text: textContent.join("\n\n")
+              },
+              ...validImageParts
+            ].filter(item => {
+              // 过滤掉空文本
+              if (item.type === "text" && (!item.text || item.text.trim() === '')) {
+                return false;
+              }
+              return true;
+            });
+          } else {
+            // 如果没有有效图像，只保留文本并添加提示
+            const errorText = "警告：无法加载图像，请检查图像URL是否有效或尝试不同的图像。";
+            if (textContent.length > 0) {
+              message.content = [{
+                type: "text", 
+                text: `${errorText}\n\n${textContent.join("\n\n")}`
+              }];
+            } else {
+              message.content = [{
+                type: "text",
+                text: errorText
+              }];
+            }
+          }
+        } else {
+          // 对于其他模型，直接移除包含无效图像的消息
+          // 或者将其转换为纯文本消息
+          if (validImageParts.length === 0 && textContent.length > 0) {
+            // 如果没有有效图像但有文本，转换为纯文本消息
+            message.content = textContent.join("\n\n");
+          } else if (validImageParts.length > 0) {
+            // 有有效图像，保留这些图像和文本
+            message.content = [
+              {
+                type: "text", 
+                text: textContent.join("\n\n")
+              },
+              ...validImageParts
+            ].filter(item => {
+              // 过滤掉空文本
+              if (item.type === "text" && (!item.text || item.text.trim() === '')) {
+                return false;
+              }
+              return true;
+            });
+          } else {
+            // 既没有有效图像也没有文本，提供一个默认消息
+            message.content = "请提供有效的图像或问题。";
           }
         }
       }
