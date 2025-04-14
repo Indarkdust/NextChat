@@ -128,11 +128,75 @@ async function processImageUrls(body: any): Promise<any> {
   return body;
 }
 
+// 添加一个图像代理路由处理函数
+export async function handleProxyImage(req: NextRequest) {
+  try {
+    // 获取请求参数
+    const url = req.nextUrl.searchParams.get('url');
+    const cacheId = req.nextUrl.searchParams.get('cacheId');
+    
+    if (!url) {
+      return NextResponse.json({ 
+        error: 'Missing URL parameter'
+      }, { status: 400 });
+    }
+    
+    console.log(`[XAI Proxy Image] Proxying image: ${url}, cacheId: ${cacheId || 'none'}`);
+    
+    // 直接请求图像
+    try {
+      const base64Data = await fetchImageAsBase64(url);
+      console.log(`[XAI Proxy Image] Successfully proxied image: ${url.substring(0, 50)}...`);
+      
+      // 返回base64数据
+      return new NextResponse(base64Data, {
+        headers: {
+          'Content-Type': 'text/plain',
+          'Cache-Control': 'public, max-age=86400' // 缓存24小时
+        }
+      });
+    } catch (error) {
+      console.error(`[XAI Proxy Image] Error proxying image:`, error);
+      
+      // 如果有缓存ID，尝试从文件系统或其他存储中获取
+      if (cacheId) {
+        console.log(`[XAI Proxy Image] Trying to retrieve image from cache with ID: ${cacheId}`);
+        
+        // 这里可以添加从缓存系统直接获取图像的逻辑
+        // 例如从文件系统或数据库读取
+        
+        // 为了演示，我们现在返回一个1x1像素的透明PNG
+        const fallbackPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+        
+        return new NextResponse(fallbackPng, {
+          headers: {
+            'Content-Type': 'text/plain'
+          }
+        });
+      }
+      
+      return NextResponse.json({ 
+        error: 'Failed to proxy image' 
+      }, { status: 500 });
+    }
+  } catch (error) {
+    console.error(`[XAI Proxy Image] Unhandled error:`, error);
+    return NextResponse.json({ 
+      error: 'Internal server error'
+    }, { status: 500 });
+  }
+}
+
 export async function handle(
   req: NextRequest,
   { params }: { params: { path: string[] } },
 ) {
   console.log("[XAI Route] params ", params);
+
+  // 检查是否是代理图像的请求
+  if (req.nextUrl.pathname.endsWith('/proxy-image')) {
+    return handleProxyImage(req);
+  }
 
   if (req.method === "OPTIONS") {
     return NextResponse.json({ body: "OK" }, { status: 200 });
