@@ -134,49 +134,106 @@ export function cacheImageToBase64Image(imageUrl: string) {
     }
   }
 
-  if (imageUrl.includes(CACHE_URL_PREFIX)) {
-    if (!imageCaches[imageUrl]) {
-      try {
-        return fetch(imageUrl, {
-          method: "GET",
-          mode: "cors",
-          credentials: "include",
-        })
-          .then((res) => {
-            if (!res.ok) {
-              throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
-            }
-            return res.blob();
-          })
-          .then(
-            async (blob) => {
-              try {
-                imageCaches[imageUrl] = await compressImage(blob, 256 * 1024);
-                return imageCaches[imageUrl];
-              } catch (error) {
-                console.error("[Image Processing] Failed to compress image:", error);
-                throw error;
-              }
-            }
-          )
-          .catch((error) => {
-            console.error("[Image Processing] Error fetching/processing image:", error);
-            return ""; // 出错时返回空字符串
-          });
-      } catch (error) {
-        console.error("[Image Processing] Critical error in image caching:", error);
-        return Promise.resolve(""); // 出错时返回空字符串
-      }
+  // 如果已经是base64格式，直接返回
+  if (imageUrl.startsWith("data:")) {
+    return Promise.resolve(imageUrl);
+  }
+
+  // 检查是否是缓存URL
+  const isCacheUrl = imageUrl.includes(CACHE_URL_PREFIX) || imageUrl.includes("c.darkdust.xyz/api/cache");
+
+  // 处理缓存URL或其他URL
+  if (isCacheUrl) {
+    if (imageCaches[imageUrl]) {
+      console.log("[Image Processing] Using cached image data for:", imageUrl);
+      return Promise.resolve(imageCaches[imageUrl]);
     }
-    return Promise.resolve(imageCaches[imageUrl]);
+
+    console.log(`[Image Processing] Fetching image from cache: ${imageUrl}`);
+
+    // 对于缓存URL使用包含凭据的请求
+    return fetch(imageUrl, {
+      method: "GET",
+      mode: "cors",
+      credentials: "include",
+      headers: {
+        // 添加常见浏览器请求头以避免被某些服务器拒绝
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Origin': window?.location?.origin || 'https://c.darkdust.xyz',
+        'Referer': window?.location?.href || 'https://c.darkdust.xyz/',
+      }
+    })
+    .then((res) => {
+      if (!res.ok) {
+        console.error(`[Image Processing] Failed to fetch image: ${res.status} ${res.statusText}`);
+        throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
+      }
+      return res.blob();
+    })
+    .then(async (blob) => {
+      try {
+        // 压缩图片为base64
+        console.log(`[Image Processing] Compressing image, size: ${Math.round(blob.size / 1024)}KB`);
+        const base64Data = await compressImage(blob, 1024 * 1024); // 增加到1MB
+        
+        // 检查base64数据有效性
+        if (!base64Data || base64Data.length < 100) {
+          throw new Error("Invalid base64 data generated");
+        }
+        
+        // 缓存结果
+        imageCaches[imageUrl] = base64Data;
+        console.log(`[Image Processing] Successfully processed image: ${imageUrl.substring(0, 50)}...`);
+        return base64Data;
+      } catch (error) {
+        console.error("[Image Processing] Failed to compress image:", error);
+        throw error;
+      }
+    })
+    .catch((error) => {
+      console.error("[Image Processing] Error processing image:", error);
+      // 对于缓存图片，尝试通过服务端代理获取
+      if (imageUrl.includes('c.darkdust.xyz/api/cache')) {
+        // 构建一个重定向URL，通过服务端代理获取
+        const cacheId = imageUrl.split('/').pop()?.split('.')[0];
+        if (cacheId) {
+          // 使用相对路径，确保经过服务端处理
+          const proxyPath = `/api/xai/proxy-image?url=${encodeURIComponent(imageUrl)}&cacheId=${cacheId}`;
+          console.log(`[Image Processing] Retrying through server proxy: ${proxyPath}`);
+          return fetch(proxyPath)
+            .then(res => {
+              if (!res.ok) throw new Error(`Proxy request failed: ${res.status}`);
+              return res.text();
+            })
+            .then(base64Data => {
+              if (base64Data && base64Data.startsWith('data:')) {
+                imageCaches[imageUrl] = base64Data;
+                return base64Data;
+              }
+              throw new Error("Invalid base64 data from proxy");
+            })
+            .catch(proxyError => {
+              console.error("[Image Processing] Proxy retrieval failed:", proxyError);
+              // 最终失败，返回空数据
+              return "";
+            });
+        }
+      }
+      return ""; // 出错时返回空字符串
+    });
   }
   
-  // 确保返回的是有效的URL或base64数据
-  if (imageUrl.startsWith("data:") || imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+  // 处理其他URL
+  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    console.log(`[Image Processing] Using external image URL: ${imageUrl}`);
     return Promise.resolve(imageUrl);
   } else if (imageUrl.startsWith("/")) {
-    // 处理相对路径，保持原样返回
-    return Promise.resolve(imageUrl);
+    // 处理相对路径，将其转换为完整URL
+    const origin = window?.location?.origin || 'https://c.darkdust.xyz';
+    const fullUrl = `${origin}${imageUrl}`;
+    console.log(`[Image Processing] Converted relative path to full URL: ${fullUrl}`);
+    return Promise.resolve(fullUrl);
   } else {
     // 尝试修复其他URL
     try {
@@ -184,7 +241,9 @@ export function cacheImageToBase64Image(imageUrl: string) {
       return Promise.resolve(fixedUrl);
     } catch {
       // 如果无法修复，添加https://前缀
-      return Promise.resolve(`https://${imageUrl}`);
+      const urlWithHttps = `https://${imageUrl}`;
+      console.log(`[Image Processing] Fixed malformed URL: ${urlWithHttps}`);
+      return Promise.resolve(urlWithHttps);
     }
   }
 }
